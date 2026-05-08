@@ -78,11 +78,19 @@ and extend the ingest layer.
 - Stores daily aggregates in DuckDB `silver.daily_features`
 - Supports `--reset`, `--weather`, `--db`; idempotent
 
-### Phase 3 - ML disaggregation *(in progress)*
-- Train a scikit-learn classifier on labeled public dataset (UK-DALE or REFIT)
-- Apply model to sample data to attribute kWh by appliance category
-- Categories: HVAC, water heater, washer/dryer, EV charger, always-on baseline
-- Store per-appliance summary (gold layer)
+### Phase 3 - NILM disaggregation `scripts/disaggregate.py` ✓
+- Builds a 5-feature matrix per interval: `usage_kwh`, `hour_sin`/`hour_cos` (cyclical),
+  `temp_c`, `ac_proxy_int`
+- Fits KMeans (k=5) and maps clusters to appliances via centroid rules (greedy, no double-assignment):
+  `baseline` → lowest kWh; `hvac` → highest ac_proxy × temp_c; `cooking` → most negative hour_sin
+  (≈ evening); `washer`/`dryer` → lower/higher kWh of remaining pair
+- Writes `gold.appliance_estimates`: one row per (esiid, date, appliance) with `estimated_kwh`
+  and `confidence` (normalized inverse distance to centroid, clamped [0.3, 1.0])
+- Validation: attributed totals match `silver.daily_features` exactly; HVAC kWh rises
+  monotonically with temperature (5.9 kWh/day at 17°C → 41.6 kWh/day at 30°C)
+- Supports `--reset`, `--db`; idempotent
+- **Limitation:** with a single ESIID and no labeled data, KMeans finds temperature/time-of-day
+  regimes more than clean appliance signatures; mean confidence 0.50–0.66 by appliance
 
 ### Phase 4 - Output
 - Export usage profile compatible with `ercot-plan-ranker` input format
@@ -149,7 +157,7 @@ smart-meter-nilm/
 
 - [x] Phase 1: Ingestion pipeline (DuckDB bronze layer)
 - [x] Phase 2: Feature engineering + weather enrichment (DuckDB silver layer)
-- [ ] Phase 3: NILM model - scikit-learn classifier (gold layer) — *in progress*
+- [x] Phase 3: NILM disaggregation — KMeans clustering + rule-based appliance attribution (gold layer)
 - [ ] Phase 4: Export + `ercot-plan-ranker` integration
 - [ ] Phase 5: Streamlit dashboard
 
