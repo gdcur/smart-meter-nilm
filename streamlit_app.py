@@ -122,25 +122,9 @@ def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
 @st.cache_data
 def load_daily_summary():
     con = duckdb.connect(DB_PATH, read_only=True)
-    df = con.execute("""
-        SELECT
-            g.usage_date,
-            sum(g.estimated_kwh)                                                        AS total_kwh,
-            sum(CASE WHEN g.appliance = 'hvac'     THEN g.estimated_kwh ELSE 0 END)    AS hvac_kwh,
-            sum(CASE WHEN g.appliance = 'washer'   THEN g.estimated_kwh ELSE 0 END)    AS washer_kwh,
-            sum(CASE WHEN g.appliance = 'dryer'    THEN g.estimated_kwh ELSE 0 END)    AS dryer_kwh,
-            sum(CASE WHEN g.appliance = 'cooking'  THEN g.estimated_kwh ELSE 0 END)    AS cooking_kwh,
-            sum(CASE WHEN g.appliance = 'baseline' THEN g.estimated_kwh ELSE 0 END)    AS baseline_kwh,
-            avg(i.temp_c)                                                               AS avg_temp_c
-        FROM gold.appliance_estimates g
-        JOIN (
-            SELECT CAST(interval_start_dt AS DATE) AS usage_date, avg(temp_c) AS temp_c
-            FROM silver.interval_features
-            GROUP BY 1
-        ) i USING (usage_date)
-        GROUP BY g.usage_date
-        ORDER BY g.usage_date
-    """).fetchdf()
+    df = con.execute(
+        "SELECT * FROM gold.daily_summary ORDER BY usage_date"
+    ).fetchdf()
     con.close()
     df["usage_date"] = pd.to_datetime(df["usage_date"])
     return df
