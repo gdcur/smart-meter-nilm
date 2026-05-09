@@ -153,11 +153,6 @@ smart-meter-nilm/
 │   ├── export.py                   # Phase 4: export → reports/ CSVs
 │   ├── generate_sample.py          # generate synthetic ERCOT CSVs from weather
 │   └── prepare_weather.py          # clean NOAA LCD export → hourly CSV
-├── src/                            # importable stubs
-│   ├── ingest.py
-│   ├── features.py
-│   ├── disaggregate.py
-│   └── export.py
 ├── dbt/
 │   └── models/
 │       ├── staging/                # stub: bronze → silver
