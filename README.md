@@ -94,11 +94,13 @@ and extend the ingest layer.
 
 ### Phase 4 - Export `scripts/export.py` ✓
 - Reads `gold.appliance_estimates` and joins `silver.interval_features` for daily temperature
-- Writes `reports/appliance_profile.csv`: one row per (date, appliance) with `estimated_kwh`
+- Writes `gold.appliance_profile`: one row per (date, appliance) with `estimated_kwh`
   and `pct_of_daily_total`
-- Writes `reports/daily_summary.csv`: one row per day with per-appliance kWh columns and
+- Writes `gold.daily_summary`: one row per day with per-appliance kWh columns and
   `avg_temp_c` — compatible with `ercot-plan-ranker` usage profile input
-- Supports `--reset`, `--out-dir`, `--db`
+- Default behavior: DuckDB only; add `--csv` to also write `reports/appliance_profile.csv`
+  and `reports/daily_summary.csv` from the gold tables
+- Supports `--reset` (drops and recreates gold export tables), `--out-dir`, `--db`; idempotent
 
 ### Phase 5 - Dashboard `streamlit_app.py` ✓
 - Reads directly from DuckDB (gold + silver layers, not from CSV)
