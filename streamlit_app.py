@@ -3,10 +3,12 @@ streamlit_app.py
 
 Phase 5 - NILM dashboard.
 
-Reads directly from DuckDB (gold + silver layers) and renders three views:
+Reads directly from DuckDB (gold + silver layers) and renders four views:
     Tab 1 - Daily total kWh over time (line chart)
     Tab 2 - Appliance breakdown by day (stacked bar chart)
     Tab 3 - HVAC load vs temperature (scatter plot)
+    Tab 4 - Daily load profile for a selected day (stacked area chart,
+            rule-based interval-level overlay)
 
 Sidebar controls:
     Date range filter (applies to all tabs)
@@ -17,8 +19,10 @@ Run:
 """
 
 import duckdb
+import numpy as np
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 DB_PATH = "data/smart_meter.duckdb"
@@ -31,10 +35,89 @@ APPLIANCE_COLORS = {
     "baseline": "#9e9e9e",
 }
 
+LOAD_PROFILE_COLORS = {
+    "hvac":     "#5b8db8",
+    "dryer":    "#4db6ac",
+    "washer":   "#7bbf7b",
+    "cooking":  "#e07b39",
+    "baseline": "#bdbdbd",
+}
+
 
 # ---------------------------------------------------------------------------
 # Data loading (cached per session)
 # ---------------------------------------------------------------------------
+
+@st.cache_data
+def load_day_intervals(date_str: str) -> pd.DataFrame:
+    con = duckdb.connect(DB_PATH, read_only=True)
+    df = con.execute("""
+        SELECT interval_start_dt, usage_kwh, hour_of_day, temp_c
+        FROM silver.interval_features
+        WHERE CAST(interval_start_dt AS DATE) = ?
+        ORDER BY interval_start_dt
+    """, [date_str]).fetchdf()
+    con.close()
+    return df
+
+
+def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Rule-based interval-level load disaggregation.
+
+    Returns df with added columns: baseline, hvac, cooking, washer, dryer.
+    Bands are scaled proportionally when their sum would exceed usage_kwh,
+    then the remainder is added to baseline so totals balance exactly.
+    """
+    result = df[["interval_start_dt", "usage_kwh", "hour_of_day", "temp_c"]].copy()
+
+    kwh  = result["usage_kwh"].values
+    hour = result["hour_of_day"].values
+    temp = result["temp_c"].fillna(result["temp_c"].mean()).values
+
+    baseline = np.minimum(kwh, 0.15)
+
+    hot    = temp > 23
+    peak_h = (hour >= 10) & (hour <= 22)
+    hvac = np.where(
+        hot & peak_h,  np.maximum(0, kwh * (temp - 23) / 15 * 0.6),
+        np.where(hot,  np.maximum(0, kwh * (temp - 23) / 15 * 0.2), 0.0),
+    )
+
+    cooking = np.where(
+        (hour >= 18) & (hour <= 20), np.maximum(0, kwh * 0.40),
+        np.where((hour >= 12) & (hour <= 13), np.maximum(0, kwh * 0.25), 0.0),
+    )
+
+    washer = np.where(
+        (hour >= 8) & (hour <= 17) & (kwh > 0.3),
+        np.maximum(0, kwh * 0.20), 0.0,
+    )
+
+    dryer = np.where(
+        (hour >= 9) & (hour <= 18) & (kwh > 0.35),
+        np.maximum(0, kwh * 0.25), 0.0,
+    )
+
+    band_sum = baseline + hvac + cooking + washer + dryer
+    scale    = np.where(band_sum > kwh, kwh / np.maximum(band_sum, 1e-9), 1.0)
+    baseline *= scale
+    hvac     *= scale
+    cooking  *= scale
+    washer   *= scale
+    dryer    *= scale
+
+    remainder = kwh - (baseline + hvac + cooking + washer + dryer)
+    baseline += remainder
+
+    result["baseline"] = baseline
+    result["hvac"]     = hvac
+    result["cooking"]  = cooking
+    result["washer"]   = washer
+    result["dryer"]    = dryer
+
+    return result
+
 
 @st.cache_data
 def load_daily_summary():
@@ -110,7 +193,9 @@ st.sidebar.markdown(f"**{len(df)} days** selected")
 # Tabs
 # ---------------------------------------------------------------------------
 
-tab1, tab2, tab3 = st.tabs(["Daily Total", "Appliance Breakdown", "HVAC vs Temperature"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["Daily Total", "Appliance Breakdown", "HVAC vs Temperature", "Daily Load Profile"]
+)
 
 
 # --- Tab 1: Daily total kWh line chart ---
@@ -194,3 +279,77 @@ with tab3:
         f"{days_ac} of {len(df)} days above {threshold:.0f}{temp_unit} "
         f"(ac_proxy threshold used in feature engineering)"
     )
+
+
+# --- Tab 4: Daily load profile (rule-based interval overlay) ---
+with tab4:
+    st.subheader("Daily Load Profile")
+
+    profile_date = st.date_input(
+        "Select date",
+        value=start_date.date(),
+        min_value=start_date.date(),
+        max_value=end_date.date(),
+        key="profile_date",
+    )
+
+    intervals = load_day_intervals(str(profile_date))
+
+    if intervals.empty:
+        st.warning(f"No interval data for {profile_date}.")
+    else:
+        bands = apply_load_rules(intervals)
+
+        day_total = intervals["usage_kwh"].sum()
+        avg_temp_c = intervals["temp_c"].mean()
+        temp_display = avg_temp_c if temp_unit == "°C" else avg_temp_c * 9 / 5 + 32
+
+        st.caption(
+            f"{profile_date}  |  Total: {day_total:.2f} kWh  |  "
+            f"Avg temp: {temp_display:.1f}{temp_unit}"
+        )
+
+        band_cols = ["baseline", "cooking", "washer", "dryer", "hvac"]
+        long = bands.melt(
+            id_vars="interval_start_dt",
+            value_vars=band_cols,
+            var_name="appliance",
+            value_name="kwh",
+        )
+
+        fig = px.area(
+            long,
+            x="interval_start_dt",
+            y="kwh",
+            color="appliance",
+            color_discrete_map=LOAD_PROFILE_COLORS,
+            labels={"interval_start_dt": "Time", "kwh": "kWh", "appliance": "Load"},
+            category_orders={"appliance": band_cols},
+        )
+
+        temp_vals = (
+            intervals["temp_c"]
+            if temp_unit == "°C"
+            else intervals["temp_c"] * 9 / 5 + 32
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=intervals["interval_start_dt"],
+                y=temp_vals,
+                name=f"Temp ({temp_unit})",
+                yaxis="y2",
+                mode="lines",
+                line=dict(color="#ef5350", width=1.5, dash="dot"),
+            )
+        )
+        fig.update_layout(
+            hovermode="x unified",
+            legend_title="Load",
+            yaxis2=dict(
+                title=f"Temperature ({temp_unit})",
+                overlaying="y",
+                side="right",
+                showgrid=False,
+            ),
+        )
+        st.plotly_chart(fig, use_container_width=True)
