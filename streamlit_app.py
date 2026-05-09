@@ -36,11 +36,13 @@ APPLIANCE_COLORS = {
 }
 
 LOAD_PROFILE_COLORS = {
-    "hvac":     "#5b8db8",
-    "dryer":    "#4db6ac",
-    "washer":   "#7bbf7b",
-    "cooking":  "#e07b39",
     "baseline": "#bdbdbd",
+    "morning":  "#9c6eb0",
+    "washer":   "#7bbf7b",
+    "dryer":    "#4db6ac",
+    "cooking":  "#e07b39",
+    "hvac":     "#5b8db8",
+    "other":    "#fffde7",
 }
 
 
@@ -65,9 +67,10 @@ def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
     """
     Rule-based interval-level load disaggregation.
 
-    Returns df with added columns: baseline, hvac, cooking, washer, dryer.
-    Bands are scaled proportionally when their sum would exceed usage_kwh,
-    then the remainder is added to baseline so totals balance exactly.
+    Bands: baseline (fixed floor), hvac, morning, cooking, washer, dryer, other.
+    Baseline is capped at min(usage_kwh, 0.15) and never modified afterwards.
+    Variable bands are scaled proportionally when their sum would exceed the
+    headroom above baseline. Unclassified load goes to 'other' (never negative).
     """
     result = df[["interval_start_dt", "usage_kwh", "hour_of_day", "temp_c"]].copy()
 
@@ -75,6 +78,7 @@ def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
     hour = result["hour_of_day"].values
     temp = result["temp_c"].fillna(result["temp_c"].mean()).values
 
+    # Fixed floor — never touched again
     baseline = np.minimum(kwh, 0.15)
 
     hot    = temp > 23
@@ -82,6 +86,11 @@ def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
     hvac = np.where(
         hot & peak_h,  np.maximum(0, kwh * (temp - 23) / 15 * 0.6),
         np.where(hot,  np.maximum(0, kwh * (temp - 23) / 15 * 0.2), 0.0),
+    )
+
+    morning = np.where(
+        (hour >= 6) & (hour <= 8) & (kwh > 0.25),
+        np.maximum(0, kwh * 0.35), 0.0,
     )
 
     cooking = np.where(
@@ -99,22 +108,26 @@ def apply_load_rules(df: pd.DataFrame) -> pd.DataFrame:
         np.maximum(0, kwh * 0.25), 0.0,
     )
 
-    band_sum = baseline + hvac + cooking + washer + dryer
-    scale    = np.where(band_sum > kwh, kwh / np.maximum(band_sum, 1e-9), 1.0)
-    baseline *= scale
-    hvac     *= scale
-    cooking  *= scale
-    washer   *= scale
-    dryer    *= scale
+    # Scale variable bands to fit within headroom above baseline
+    available    = np.maximum(0, kwh - baseline)
+    variable_sum = hvac + morning + cooking + washer + dryer
+    scale        = np.where(variable_sum > available, available / np.maximum(variable_sum, 1e-9), 1.0)
+    hvac    *= scale
+    morning *= scale
+    cooking *= scale
+    washer  *= scale
+    dryer   *= scale
 
-    remainder = kwh - (baseline + hvac + cooking + washer + dryer)
-    baseline += remainder
+    # Unclassified remainder — never negative, never rolled into baseline
+    other = np.maximum(0, kwh - (baseline + hvac + morning + cooking + washer + dryer))
 
     result["baseline"] = baseline
     result["hvac"]     = hvac
+    result["morning"]  = morning
     result["cooking"]  = cooking
     result["washer"]   = washer
     result["dryer"]    = dryer
+    result["other"]    = other
 
     return result
 
@@ -293,7 +306,7 @@ with tab4:
             f"Avg temp: {temp_display:.1f}{temp_unit}"
         )
 
-        band_cols = ["baseline", "cooking", "washer", "dryer", "hvac"]
+        band_cols = ["baseline", "morning", "washer", "dryer", "cooking", "hvac", "other"]
         long = bands.melt(
             id_vars="interval_start_dt",
             value_vars=band_cols,

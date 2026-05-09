@@ -108,11 +108,13 @@ and extend the ingest layer.
 - **Tab 2** — Appliance breakdown stacked bar chart + avg attribution table
 - **Tab 3** — HVAC load vs temperature scatter plot
 - **Tab 4** — Daily load profile: stacked area chart of 15-min intervals for a
-  selected day using a rule-based overlay (baseline floor, HVAC proportional to
-  temperature, cooking at meal hours, washer/dryer by hour and power threshold);
-  bands are scaled proportionally when their sum exceeds the measured kWh so
-  totals balance exactly; outdoor temperature overlaid as a dotted line on a
-  secondary y-axis (respects °C / °F sidebar toggle)
+  selected day using a rule-based overlay (baseline floor capped at 0.15 kWh,
+  HVAC proportional to temperature, morning routine detection 06–08 h,
+  cooking at meal hours, washer/dryer by hour and power threshold); variable
+  bands are scaled proportionally when their sum exceeds headroom above baseline;
+  unclassified load assigned to a separate `other` band (never rolled into
+  baseline); outdoor temperature overlaid as a dotted line on a secondary y-axis
+  (respects °C / °F sidebar toggle)
 - Sidebar: date range filter (applies to all tabs) and °C / °F toggle (display only)
 - Run with: `streamlit run streamlit_app.py`
 
