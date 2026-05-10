@@ -9,7 +9,10 @@ Output: data/sample/YYYY/MM/YYYYMMDD.csv      (one file per day)
 
 Appliance signatures simulated:
     - Baseline       : fridge cycling, standby devices (~0.10-0.15 kWh per interval)
-    - HVAC           : temperature-driven, ramps above 23C, peaks in afternoon
+    - HVAC           : duty-cycle simulation — on blocks of 4-8 intervals, off
+                       blocks of 2-4 intervals; hotter = longer on, shorter off;
+                       a single noise factor applied to each block so load looks
+                       like a sustained plateau with occasional dips
     - Washer         : 2-3 cycles/day, ~45 min each, daytime only
     - Dryer          : follows washer by 5-10 min, similar duration
     - Oven/cooking   : dinner spike 18:00-20:00, occasional lunch 12:00-13:00
@@ -62,6 +65,54 @@ def ac_load_kw(temp_c: float) -> float:
         return 0.8 + (temp_c - 26.0) / 6.0 * 1.2
     else:
         return min(2.0 + (temp_c - 32.0) * 0.25, 3.5)
+
+
+# ---------------------------------------------------------------------------
+# A/C duty-cycle schedule
+# ---------------------------------------------------------------------------
+
+def build_ac_schedule(hourly_temps: pd.Series) -> np.ndarray:
+    """
+    Generate a 96-element array of per-interval A/C noise multipliers.
+
+    Value is 0.0 when A/C is off; a block-level noise factor (0.88-1.12)
+    when A/C is on.  The same noise factor applies to every interval in a
+    block so the resulting load looks like a flat plateau, not random spikes.
+
+    Duty cycle parameters scale with temperature:
+        hotter → longer on-blocks (4-8 intervals), shorter off-blocks (2-4)
+        cooler → shorter on-blocks, longer off-blocks
+    """
+    schedule = np.zeros(96)
+    interval = 0
+
+    while interval < 96:
+        hour = interval // 4
+        temp = float(hourly_temps.iloc[min(hour, 23)])
+
+        if temp <= 23.0:
+            interval += 1
+            continue
+
+        # Temperature factor: 0 at 23°C, 1 at 35°C+
+        t = float(np.clip((temp - 23.0) / 12.0, 0.0, 1.0))
+
+        on_lo  = int(4 + round(t * 3))          # 4 → 7
+        on_hi  = int(5 + round(t * 3))          # 5 → 8
+        off_lo = max(2, int(4 - round(t * 2)))  # 4 → 2
+        off_hi = max(off_lo, int(4 - round(t))) # 4 → 3
+
+        on_dur  = int(RNG.integers(on_lo,  on_hi  + 1))
+        off_dur = int(RNG.integers(off_lo, off_hi + 1))
+
+        # Single noise factor for the whole on-block
+        block_noise = float(RNG.uniform(0.88, 1.12))
+        for i in range(interval, min(interval + on_dur, 96)):
+            schedule[i] = block_noise
+
+        interval += on_dur + off_dur
+
+    return schedule
 
 
 # ---------------------------------------------------------------------------
@@ -149,17 +200,16 @@ def build_day_load(date: pd.Timestamp,
     baseline = RNG.uniform(0.10, 0.15, size=96)
     load += baseline
 
-    # 2. HVAC - temperature driven, per interval
+    # 2. HVAC - duty-cycle simulation
+    ac_schedule = build_ac_schedule(hourly_temps)
     for interval in range(96):
-        hour = interval // 4
-        temp = hourly_temps.iloc[hour] if hour < len(hourly_temps) else hourly_temps.iloc[-1]
-        ac_kw = ac_load_kw(float(temp))
-        # Add slight randomness (cycling on/off)
-        ac_kw *= float(RNG.uniform(0.85, 1.15))
-        # Overnight reduction (23:00-07:00)
-        if hour < 7 or hour >= 23:
-            ac_kw *= 0.3
-        load[interval] += ac_kw * 0.25  # kW * 0.25h = kWh
+        if ac_schedule[interval] == 0.0:
+            continue
+        hour  = interval // 4
+        temp  = float(hourly_temps.iloc[min(hour, 23)])
+        ac_kw = ac_load_kw(temp)
+        night_factor = 0.3 if (hour < 7 or hour >= 23) else 1.0
+        load[interval] += ac_kw * ac_schedule[interval] * night_factor * 0.25
 
     # 3. Washer/dryer
     for start, dur, kw in washer_dryer_events(date):
