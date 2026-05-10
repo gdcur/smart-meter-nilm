@@ -284,35 +284,34 @@ with tab3:
 with tab4:
     st.subheader("Daily Load Profile")
 
-    if "lp_date" not in st.session_state:
-        st.session_state.lp_date = start_date.date()
-    st.session_state.lp_date = max(start_date.date(),
-                                    min(end_date.date(), st.session_state.lp_date))
+    # Bootstrap the widget key; clamp if the sidebar date range changed
+    if "lp_date_picker" not in st.session_state:
+        st.session_state["lp_date_picker"] = start_date.date()
+    clamped = max(start_date.date(), min(end_date.date(), st.session_state["lp_date_picker"]))
+    if clamped != st.session_state["lp_date_picker"]:
+        st.session_state["lp_date_picker"] = clamped
 
     col_prev, col_date, col_next = st.columns([1, 5, 1])
     with col_prev:
-        if st.button("◀", disabled=(st.session_state.lp_date <= start_date.date()),
-                     use_container_width=True):
-            st.session_state.lp_date -= timedelta(days=1)
+        if st.button("◀", disabled=(st.session_state["lp_date_picker"] <= start_date.date()),
+                     width="stretch"):
+            st.session_state["lp_date_picker"] = st.session_state["lp_date_picker"] - timedelta(days=1)
             st.rerun()
     with col_date:
-        picked = st.date_input(
+        st.date_input(
             "Select date",
-            value=st.session_state.lp_date,
             min_value=start_date.date(),
             max_value=end_date.date(),
             key="lp_date_picker",
             label_visibility="collapsed",
         )
-        if picked != st.session_state.lp_date:
-            st.session_state.lp_date = picked
     with col_next:
-        if st.button("▶", disabled=(st.session_state.lp_date >= end_date.date()),
-                     use_container_width=True):
-            st.session_state.lp_date += timedelta(days=1)
+        if st.button("▶", disabled=(st.session_state["lp_date_picker"] >= end_date.date()),
+                     width="stretch"):
+            st.session_state["lp_date_picker"] = st.session_state["lp_date_picker"] + timedelta(days=1)
             st.rerun()
 
-    profile_date = st.session_state.lp_date
+    profile_date = st.session_state["lp_date_picker"]
     intervals = load_day_intervals(str(profile_date))
 
     if intervals.empty:
