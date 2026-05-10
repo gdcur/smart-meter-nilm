@@ -18,6 +18,8 @@ Run:
     streamlit run streamlit_app.py
 """
 
+from datetime import timedelta
+
 import duckdb
 import numpy as np
 import pandas as pd
@@ -282,14 +284,35 @@ with tab3:
 with tab4:
     st.subheader("Daily Load Profile")
 
-    profile_date = st.date_input(
-        "Select date",
-        value=start_date.date(),
-        min_value=start_date.date(),
-        max_value=end_date.date(),
-        key="profile_date",
-    )
+    if "lp_date" not in st.session_state:
+        st.session_state.lp_date = start_date.date()
+    st.session_state.lp_date = max(start_date.date(),
+                                    min(end_date.date(), st.session_state.lp_date))
 
+    col_prev, col_date, col_next = st.columns([1, 5, 1])
+    with col_prev:
+        if st.button("◀", disabled=(st.session_state.lp_date <= start_date.date()),
+                     use_container_width=True):
+            st.session_state.lp_date -= timedelta(days=1)
+            st.rerun()
+    with col_date:
+        picked = st.date_input(
+            "Select date",
+            value=st.session_state.lp_date,
+            min_value=start_date.date(),
+            max_value=end_date.date(),
+            key="lp_date_picker",
+            label_visibility="collapsed",
+        )
+        if picked != st.session_state.lp_date:
+            st.session_state.lp_date = picked
+    with col_next:
+        if st.button("▶", disabled=(st.session_state.lp_date >= end_date.date()),
+                     use_container_width=True):
+            st.session_state.lp_date += timedelta(days=1)
+            st.rerun()
+
+    profile_date = st.session_state.lp_date
     intervals = load_day_intervals(str(profile_date))
 
     if intervals.empty:
