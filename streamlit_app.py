@@ -306,7 +306,7 @@ with tab4:
             f"Avg temp: {temp_display:.1f}{temp_unit}"
         )
 
-        band_cols = ["baseline", "morning", "washer", "dryer", "cooking", "hvac", "other"]
+        band_cols = ["baseline", "hvac", "washer", "dryer", "cooking", "morning", "other"]
         long = bands.melt(
             id_vars="interval_start_dt",
             value_vars=band_cols,
