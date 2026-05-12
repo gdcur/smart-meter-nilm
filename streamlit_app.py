@@ -210,7 +210,7 @@ with tab1:
     )
     fig.update_traces(line_color="#4a90d9", marker_size=4)
     fig.update_layout(hovermode="x unified")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Avg kWh / day", f"{df['total_kwh'].mean():.1f}")
@@ -241,13 +241,13 @@ with tab2:
         category_orders={"appliance": ["hvac", "dryer", "washer", "cooking", "baseline"]},
     )
     fig.update_layout(barmode="stack", hovermode="x unified", legend_title="Appliance")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("Average daily attribution")
     avg = df[appliance_cols].mean().rename(lambda c: c.replace("_kwh", ""))
     avg_pct = (avg / avg.sum() * 100).round(1)
     summary_df = pd.DataFrame({"Avg kWh/day": avg.round(2), "Share (%)": avg_pct})
-    st.dataframe(summary_df.sort_values("Avg kWh/day", ascending=False), use_container_width=True)
+    st.dataframe(summary_df.sort_values("Avg kWh/day", ascending=False), width="stretch")
 
 
 # --- Tab 3: HVAC vs temperature scatter ---
@@ -270,7 +270,7 @@ with tab3:
     )
     fig.update_traces(marker_size=8)
     fig.update_layout(coloraxis_showscale=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     threshold = 23.0 if temp_unit == "°C" else 73.4
     days_ac = (df["avg_temp_display"] > threshold).sum()
@@ -376,4 +376,4 @@ with tab4:
                 showgrid=False,
             ),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
