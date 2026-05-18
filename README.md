@@ -122,14 +122,37 @@ and extend the ingest layer.
 
 ## Stack
 
-| Layer | Tool |
-|---|---|
-| Storage | DuckDB, Parquet |
-| Ingestion | Python, pandas |
-| Transformation | dbt Core |
-| ML | scikit-learn |
-| Orchestration | Airflow (reads and loads the sample dataset) |
-| Visualization | Streamlit |
+| Layer | Local pipeline | Databricks notebook |
+|---|---|---|
+| Storage | DuckDB, Parquet | Delta Lake |
+| Ingestion | Python, pandas | PySpark |
+| Transformation | dbt Core | Spark SQL |
+| ML | scikit-learn KMeans | MLlib KMeans |
+| Orchestration | Airflow | Databricks Jobs |
+| Visualization | Streamlit | Databricks display() |
+
+---
+
+## Databricks / dual-target pattern
+
+`notebooks/smart_meter_nilm_databricks.py` is a Databricks notebook
+(Python format with `# COMMAND ----------` cell separators) that runs
+the same pipeline on Spark + Delta Lake instead of DuckDB + pandas.
+
+Same logic, different execution engine — the same cluster mapping rules,
+the same 5-feature matrix, and the same bronze → silver → gold medallion
+structure. This dual-target approach (local DuckDB for fast iteration,
+Databricks for scale) mirrors the pattern used in
+[xml-drift-lakehouse](https://github.com/gdcur/xml-drift-lakehouse).
+
+To run on Databricks Free edition:
+1. Upload sample data to DBFS:
+   ```
+   databricks fs cp -r data/sample/ dbfs:/FileStore/smart_meter_nilm/sample/
+   databricks fs cp data/sample/weather_hourly_clean.csv dbfs:/FileStore/smart_meter_nilm/weather_hourly_clean.csv
+   ```
+2. Import `notebooks/smart_meter_nilm_databricks.py` into your workspace
+3. Attach to any cluster and click **Run All**
 
 ---
 
@@ -187,6 +210,15 @@ smart-meter-nilm/
 - [x] Phase 3: NILM disaggregation — KMeans clustering + rule-based appliance attribution (gold layer)
 - [x] Phase 4: Export — appliance profile + daily summary CSVs
 - [x] Phase 5: Streamlit dashboard — daily total, appliance breakdown, HVAC vs temperature
+- [x] Phase 6: Airflow orchestration — `dags/load_sample.py`
+
+### Phase 6 - Orchestration `dags/load_sample.py` ✓
+- Airflow DAG `smart_meter_nilm_pipeline` with `@daily` schedule, `start_date=2025-05-01`, `catchup=False`
+- Four `BashOperator` tasks in a linear chain: `ingest → features → disaggregate → export`
+- Each task runs the corresponding `scripts/*.py` from the project root
+- Portfolio/local design: orchestrates existing scripts, does not reimplement their logic
+- Airflow is not in `requirements.txt` (installation is environment-specific); install with `pip install apache-airflow`
+- Trigger manually: `airflow dags trigger smart_meter_nilm_pipeline`
 
 ---
 
